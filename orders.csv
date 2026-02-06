@@ -1,3 +1,2 @@
 Order_ID,WAC_Group,Supplier,Total_Pieces,Total_Cost,Unit_Cost,Status
-TEST-01,Ess_Hoodie,Jake,10,1000.0,100.0,Received
-,,,0,0.0,0.0,Ordered
+TEST-01,Ess_HoodiePant,jake,100,5000.0,50.0,Received
