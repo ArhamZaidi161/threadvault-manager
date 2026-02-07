@@ -1,47 +1,42 @@
 import csv
 import os
-from datetime import date
+import shutil
+from datetime import datetime, date
 
 # --- CONFIGURATION ---
 INVENTORY_FILE = 'inventory.csv'
 SALES_FILE = 'sales.csv'
 ORDERS_FILE = 'orders.csv'
+BACKUP_DIR = 'backups'
 
-# I use these columns to ensure my files always have the correct headers
-INVENTORY_COLUMNS = ["Brand", "Type", "Color", "Size", "Quantity", "WAC_Cost"]
+# Added WAC_Group to inventory to track the connection
+INVENTORY_COLUMNS = ["Brand", "Type", "Color", "Size", "Quantity", "WAC_Cost", "WAC_Group"]
 SALES_COLUMNS = ["Date", "Brand", "Type", "Color", "Size", "Sale_Price", "Profit"]
 ORDER_COLUMNS = ["Order_ID", "WAC_Group", "Supplier", "Total_Pieces", "Total_Cost", "Unit_Cost", "Status"]
 
-# --- SMART LISTS (The "Brain" of the App) ---
-
-# 1. WAC GROUPS: These are the financial buckets I use in my Orders
 VALID_WAC_GROUPS = [
-    "Ess_HoodiePant",
-    "Ess_TeeShort",
-    "Spdr_HoodiePant",
-    "Den_HoodiePant",
-    "Eric_EmanShorts"
+    "Ess_HoodiePant", "Ess_TeeShort", "Spdr_HoodiePant", "Den_HoodiePant", "Eric_EmanShorts"
 ]
 
-# 2. BRAND MAPPING: When I select a WAC Group, the App knows the Brand automatically
 WAC_TO_BRAND = {
-    "Ess_HoodiePant": "ESSENTIALS",
-    "Ess_TeeShort": "ESSENTIALS",
-    "Spdr_HoodiePant": "SP5DER",
-    "Den_HoodiePant": "DENIM TEARS",
+    "Ess_HoodiePant": "ESSENTIALS", "Ess_TeeShort": "ESSENTIALS",
+    "Spdr_HoodiePant": "SP5DER", "Den_HoodiePant": "DENIM TEARS",
     "Eric_EmanShorts": "ERIC EMANUEL"
 }
 
-# 3. TYPE RESTRICTIONS: When I select a WAC Group, the App knows what TYPES are allowed
 WAC_TO_TYPES = {
-    "Ess_HoodiePant": ["HOODIE", "PANT"],
-    "Ess_TeeShort": ["TEE", "SHORTS"],
-    "Spdr_HoodiePant": ["HOODIE", "PANT"],
-    "Den_HoodiePant": ["HOODIE", "PANT"],
+    "Ess_HoodiePant": ["HOODIE", "PANT"], "Ess_TeeShort": ["TEE", "SHORTS"],
+    "Spdr_HoodiePant": ["HOODIE", "PANT"], "Den_HoodiePant": ["HOODIE", "PANT"],
     "Eric_EmanShorts": ["SHORTS"]
 }
 
-# 4. SIZE RULES: The App knows which sizes exist for which brand
+BRAND_TYPES = {
+    "ESSENTIALS": ["HOODIE", "PANT", "TEE", "SHORTS"],
+    "SP5DER": ["HOODIE", "PANT"],
+    "DENIM TEARS": ["HOODIE", "PANT"],
+    "ERIC EMANUEL": ["SHORTS"]
+}
+
 SIZE_MAP = {
     "ESSENTIALS": ["XS", "S", "M", "L"],
     "SP5DER": ["S", "M", "L"],
@@ -49,58 +44,84 @@ SIZE_MAP = {
     "ERIC EMANUEL": ["XS", "S", "M", "L", "XL"]
 }
 
-# 5. COLORS: The standard colors I trade in
-VALID_COLORS = [
-    "BLACK", "L/O", "D/O", "B22", "PINK", "BLUE", "RED", "NAVY", "GREY"
-]
+BRAND_COLORS = {
+    "ESSENTIALS": ["BLACK", "B22", "L/O", "D/O", "1977 D/O", "1977 IRON"],
+    "SP5DER": ["BLACK", "PINK", "BLUE"],
+    "DENIM TEARS": ["GREY", "BLACK"],
+    "ERIC EMANUEL": ["BLACK", "NAVY", "GREY", "LIGHT BLUE", "RED", "WHITE"]
+}
 
 # --- HELPER FUNCTIONS ---
 
-def get_valid_float(prompt):
-    # I use this to stop the app from crashing if I type letters instead of numbers
+def create_backup():
+    if not os.path.exists(BACKUP_DIR):
+        os.makedirs(BACKUP_DIR)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    files = [INVENTORY_FILE, SALES_FILE, ORDERS_FILE]
+    
+    for f in files:
+        if os.path.exists(f):
+            shutil.copy2(f, os.path.join(BACKUP_DIR, f"{f}_{timestamp}.bak"))
+
+def get_valid_float(prompt, allow_empty_as_zero=False):
     while True:
+        entry = input(prompt).strip()
+        if entry.upper() == 'CANCEL':
+            return None
+        
+        if allow_empty_as_zero and entry == "":
+            return 0.0
+
         try:
-            value = float(input(prompt).strip())
+            value = float(entry)
             if value < 0:
                 print("Value cannot be negative.")
                 continue
             return value
         except ValueError:
-            print("Please enter a valid number.")
+            print("Invalid number. Type a number or 'CANCEL'.")
 
-def get_selection(prompt, options, allow_custom=False):
-    # I use this to force myself to pick from a list so I don't make typos
+def get_selection(prompt, options, custom_label=None):
     print(f"\n{prompt}")
     for i, opt in enumerate(options):
         print(f"{i + 1}. {opt}")
     
-    if allow_custom:
-        print(f"{len(options) + 1}. [Type Custom Value]")
+    if custom_label:
+        print(f"{len(options) + 1}. [{custom_label}]")
+    print("0. [DONE/BACK]")
 
     while True:
-        choice = input("Select option # (or type value): ").strip().upper()
-        
-        # If I typed a number
+        choice = input("Select option #: ").strip().upper()
+        if choice == '0' or choice == 'DONE' or choice == 'BACK': return None
+
         if choice.isdigit():
             idx = int(choice) - 1
             if 0 <= idx < len(options):
                 return options[idx]
-            elif allow_custom and idx == len(options):
-                return input("Enter custom value: ").strip().upper()
+            elif custom_label and idx == len(options):
+                val = input(f"Enter {custom_label}: ").strip().upper()
+                return val if val else None 
         
-        # If I typed the text directly (e.g. "BLACK")
-        if choice in options:
-            return choice
-            
-        # If I typed a custom word and custom is allowed
-        if allow_custom and not choice.isdigit():
-             return choice
+        if choice in options: return choice
+        if custom_label and not choice.isdigit(): return choice
 
-        print("Invalid selection. Please pick a number from the list.")
+        print("Invalid selection.")
+
+def confirm_action(summary_text):
+    print("\n" + "="*40)
+    print("REVIEW DETAILS")
+    print("="*40)
+    print(summary_text)
+    print("="*40)
+    while True:
+        ans = input("Is this correct? (y = save / n = retry / c = cancel menu): ").strip().lower()
+        if ans == 'y': return "SAVE"
+        if ans == 'n': return "RETRY"
+        if ans == 'c': return "CANCEL"
 
 def load_csv(filename):
-    if not os.path.exists(filename):
-        return []
+    if not os.path.exists(filename): return []
     with open(filename, mode='r') as file:
         return list(csv.DictReader(file))
 
@@ -110,279 +131,513 @@ def save_csv(filename, columns, data):
         writer.writeheader()
         writer.writerows(data)
 
-# --- MAIN FEATURES ---
+def get_next_order_id():
+    orders = load_csv(ORDERS_FILE)
+    if not orders: return "1"
+    max_id = 0
+    for row in orders:
+        try:
+            cid = int(row['Order_ID'])
+            if cid > max_id: max_id = cid
+        except: continue
+    return str(max_id + 1)
+
+def find_wac_group(brand, type_):
+    """Determines which WAC Group an item belongs to based on Brand/Type."""
+    for group, types in WAC_TO_TYPES.items():
+        mapped_brand = WAC_TO_BRAND.get(group)
+        if mapped_brand == brand and type_ in types:
+            return group
+    return "UNKNOWN"
+
+def recalculate_global_wac(target_group):
+    """
+    1. Finds ALL items in inventory belonging to the target_group.
+    2. Sums total value and total quantity.
+    3. Calculates new average.
+    4. Updates ALL items in that group to the new average.
+    """
+    if target_group == "UNKNOWN":
+        return # Cannot average unknown groups
+        
+    inventory = load_csv(INVENTORY_FILE)
+    
+    total_qty = 0
+    total_value = 0.0
+    
+    # Pass 1: Calculate Totals
+    for row in inventory:
+        # Check if row belongs to group (either by saved column or lookup)
+        row_group = row.get('WAC_Group')
+        if not row_group:
+            row_group = find_wac_group(row['Brand'], row['Type'])
+            
+        if row_group == target_group:
+            q = int(row['Quantity'])
+            c = float(row['WAC_Cost'])
+            total_qty += q
+            total_value += (q * c)
+    
+    if total_qty == 0:
+        return
+
+    new_global_wac = total_value / total_qty
+    new_wac_str = str(round(new_global_wac, 2))
+    
+    print(f"\n[SYSTEM] Recalculating Global WAC for {target_group}...")
+    print(f"  Total Units: {total_qty} | Total Value: ${total_value:,.2f} | New WAC: ${new_wac_str}")
+
+    # Pass 2: Update Rows
+    for row in inventory:
+        row_group = row.get('WAC_Group')
+        if not row_group:
+            row_group = find_wac_group(row['Brand'], row['Type'])
+            
+        if row_group == target_group:
+            row['WAC_Cost'] = new_wac_str
+            row['WAC_Group'] = target_group # Ensure column is populated
+            
+    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
+
+# --- FEATURES ---
 
 def create_purchase_order():
-    print("\n--- STEP 1: CREATE PURCHASE ORDER ---")
-    
-    order_id = input("Order ID (e.g. 21): ").strip()
-    
-    # I select the WAC Group from my preset list to avoid typos
-    wac_group = get_selection("Select WAC Group:", VALID_WAC_GROUPS, allow_custom=False)
-    
-    supplier = input("Supplier Name: ").strip()
-    
-    total_pieces = int(get_valid_float("Total Pieces: "))
-    total_cost = get_valid_float("Total Cost ($): ")
-    
-    if total_pieces > 0:
-        unit_cost = total_cost / total_pieces
-    else:
-        unit_cost = 0.0
+    while True:
+        print("\n--- STEP 1: CREATE PURCHASE ORDER ---")
+        new_order_id = get_next_order_id()
+        print(f"New Order ID: #{new_order_id}")
         
-    print(f"Calculated Unit Cost: ${unit_cost:.2f}")
+        supplier = input("Supplier Name (or 'c' to cancel): ").strip()
+        if supplier.lower() == 'c': return
 
-    orders = load_csv(ORDERS_FILE)
-    orders.append({
-        "Order_ID": order_id,
-        "WAC_Group": wac_group,
-        "Supplier": supplier,
-        "Total_Pieces": str(total_pieces),
-        "Total_Cost": str(total_cost),
-        "Unit_Cost": str(round(unit_cost, 2)),
-        "Status": "Ordered"
-    })
-    save_csv(ORDERS_FILE, ORDER_COLUMNS, orders)
-    print(f"Order {order_id} saved.")
+        try:
+            num_groups_in = input("How many different Brands/Groups in this order? ")
+            if num_groups_in.lower() == 'c': return
+            num_groups = int(num_groups_in)
+        except ValueError:
+            print("Invalid number.")
+            continue
+
+        staged_orders = []
+        for i in range(num_groups):
+            print(f"\n--- Group {i+1}/{num_groups} ---")
+            wac_group = get_selection("Select WAC Group:", VALID_WAC_GROUPS, "Add Custom")
+            if not wac_group: return 
+
+            pcs = get_valid_float(f"Total Pieces for {wac_group}: ")
+            if pcs is None: return
+            cost = get_valid_float(f"Total Cost for {wac_group} ($): ")
+            if cost is None: return
+
+            unit = cost / pcs if pcs > 0 else 0
+            
+            staged_orders.append({
+                "Order_ID": new_order_id, "WAC_Group": wac_group, "Supplier": supplier,
+                "Total_Pieces": str(int(pcs)), "Total_Cost": str(cost),
+                "Unit_Cost": str(round(unit, 2)), "Status": "Ordered"
+            })
+
+        summary = f"Supplier: {supplier}\nItems:\n"
+        for o in staged_orders:
+            summary += f" - {o['WAC_Group']}: {o['Total_Pieces']} pcs @ ${o['Unit_Cost']}/ea\n"
+        
+        action = confirm_action(summary)
+        if action == "SAVE":
+            existing = load_csv(ORDERS_FILE)
+            existing.extend(staged_orders)
+            save_csv(ORDERS_FILE, ORDER_COLUMNS, existing)
+            print("Saved!")
+            break
+        elif action == "CANCEL": break
 
 def receive_stock():
     print("\n--- STEP 2: RECEIVE STOCK ---")
-    
-    order_id = input("Enter Order ID to receive: ").strip()
-    
     all_orders = load_csv(ORDERS_FILE)
-    matching_orders = []
     
-    for i, row in enumerate(all_orders):
-        if row['Order_ID'] == order_id:
-            matching_orders.append((i, row))
+    pending_ids = {} 
+    for row in all_orders:
+        if row['Status'] == 'Ordered':
+            oid = row['Order_ID']
+            if oid not in pending_ids:
+                pending_ids[oid] = {'Supplier': row['Supplier'], 'Groups': 0}
+            pending_ids[oid]['Groups'] += 1
             
-    if not matching_orders:
-        print("Order ID not found.")
+    if not pending_ids:
+        print("No pending orders found.")
         return
 
-    # I choose which WAC Group from this order I am receiving
-    print(f"\nFound {len(matching_orders)} groups in Order {order_id}:")
-    for idx, (original_index, row) in enumerate(matching_orders):
-        print(f"{idx + 1}. {row['WAC_Group']} (Cost: ${row['Unit_Cost']}/ea)")
+    print("\nPENDING ORDERS:")
+    order_list = list(pending_ids.keys())
+    for i, oid in enumerate(order_list):
+        info = pending_ids[oid]
+        print(f"{i + 1}. Order #{oid} | {info['Supplier']} | {info['Groups']} Groups pending")
         
-    choice_idx = int(get_valid_float("Select Group # to receive: ")) - 1
-    
-    if choice_idx < 0 or choice_idx >= len(matching_orders):
+    choice = get_valid_float("Select Order # to Receive: ")
+    if choice is None: return
+    choice = int(choice) - 1
+
+    if choice < 0 or choice >= len(order_list):
         print("Invalid selection.")
         return
 
-    selected_index, selected_order = matching_orders[choice_idx]
-    wac_group = selected_order['WAC_Group']
-    unit_cost = float(selected_order['Unit_Cost'])
+    target_order_id = order_list[choice]
     
-    print(f"\nReceiving {wac_group} @ ${unit_cost:.2f}")
-
-    # --- AUTO-INFERENCE LOGIC ---
-    # The App determines Brand and valid Types based on the WAC Group
-    inferred_brand = WAC_TO_BRAND.get(wac_group, "UNKNOWN")
-    allowed_types = WAC_TO_TYPES.get(wac_group, [])
-    
-    # I set the Brand automatically
-    if inferred_brand != "UNKNOWN":
-        print(f"Brand identified as: {inferred_brand}")
-        brand = inferred_brand
-    else:
-        brand = input("Enter Brand: ").strip().upper()
-
-    # I select the Type from the allowed list (e.g., Hoodie or Pant)
-    if allowed_types:
-        type_ = get_selection("Select Type:", allowed_types, allow_custom=True)
-    else:
-        type_ = input("Enter Type: ").strip().upper()
-
-    # I select the Color (Presets + Custom option)
-    color = get_selection("Select Color:", VALID_COLORS, allow_custom=True)
-    
-    # I determine valid sizes based on the Brand
-    valid_sizes = SIZE_MAP.get(brand, ["S", "M", "L"]) # Default to S-L if unknown
-    
-    inventory = load_csv(INVENTORY_FILE)
-    
-    # Loop to add multiple sizes for this specific Brand/Type/Color
     while True:
-        size = get_selection("Select Size (or type DONE to finish):", valid_sizes, allow_custom=True)
+        all_orders = load_csv(ORDERS_FILE)
+        order_groups = []
+        for i, row in enumerate(all_orders):
+            if row['Order_ID'] == target_order_id and row['Status'] == 'Ordered':
+                order_groups.append((i, row))
         
-        if size == 'DONE':
-            break
-            
-        qty_received = int(get_valid_float(f"Quantity of {size} received: "))
-        
-        # WAC CALCULATION
-        found = False
-        for row in inventory:
-            if (row['Brand'] == brand and row['Type'] == type_ and 
-                row['Color'] == color and row['Size'] == size):
-                
-                old_qty = int(row['Quantity'])
-                old_wac = float(row['WAC_Cost'])
-                
-                total_value = (old_qty * old_wac) + (qty_received * unit_cost)
-                total_qty = old_qty + qty_received
-                new_wac = total_value / total_qty
-                
-                row['Quantity'] = str(total_qty)
-                row['WAC_Cost'] = str(round(new_wac, 2))
-                print(f"Updated {size}: Stock {total_qty}, New WAC ${new_wac:.2f}")
-                found = True
-                break
-        
-        if not found:
-            inventory.append({
-                "Brand": brand, "Type": type_, "Color": color, "Size": size,
-                "Quantity": str(qty_received),
-                "WAC_Cost": str(round(unit_cost, 2))
-            })
-            print(f"Added {size}: Stock {qty_received}")
+        if not order_groups:
+            print("All groups in this order have been received!")
+            return
 
-    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
-    
-    # Update Order Status
-    all_orders[selected_index]['Status'] = "Received"
-    save_csv(ORDERS_FILE, ORDER_COLUMNS, all_orders)
-    print("Stock updated successfully.")
+        print(f"\n--- Processing Order #{target_order_id} ---")
+        current_index, current_row = order_groups[0]
+        wac_group = current_row['WAC_Group']
+        unit_cost = float(current_row['Unit_Cost'])
+        
+        print(f"Current Group: {wac_group} (Cost: ${unit_cost:.2f}/ea)")
+        proceed = input("Receive this group now? (y/n - n skips to next group): ").lower()
+        if proceed != 'y':
+            print("Skipping remaining items in this order.")
+            return
+
+        brand = WAC_TO_BRAND.get(wac_group, "UNKNOWN")
+        allowed_types = WAC_TO_TYPES.get(wac_group, [])
+        
+        if brand == "UNKNOWN":
+            brand = input("Brand not detected. Enter Brand: ").strip().upper()
+            if not brand: return
+        else:
+            print(f"Brand identified: {brand}")
+
+        while True:
+            if len(allowed_types) == 1:
+                type_ = allowed_types[0]
+                print(f"Auto-selected Type: {type_}")
+                single_type_mode = True
+            elif allowed_types:
+                type_ = get_selection(f"Select Type for {brand}:", allowed_types, custom_label="Add New Type")
+                single_type_mode = False
+            else:
+                type_ = input("Enter Type: ").strip().upper()
+                single_type_mode = False
+
+            if not type_: break 
+
+            while True:
+                brand_colors = BRAND_COLORS.get(brand, ["BLACK", "WHITE"])
+                color = get_selection(f"Select Color for {type_}:", brand_colors, custom_label="Add New Color")
+                
+                if not color: break
+
+                valid_sizes = SIZE_MAP.get(brand, ["S", "M", "L"])
+                staged_items = []
+                
+                print(f"\n--- BATCH ENTRY: {brand} {type_} {color} ---")
+                print("Enter quantity for each size (Press Enter to skip/0)")
+                
+                for size in valid_sizes:
+                    qty = get_valid_float(f"  Qty {size}: ", allow_empty_as_zero=True)
+                    if qty is None: break 
+                    if qty > 0:
+                        staged_items.append((size, int(qty)))
+
+                while True:
+                    add_custom = input("  Add outlier/custom size? (y/n): ").lower()
+                    if add_custom != 'y': break
+                    
+                    cust_size = input("    Enter Size: ").strip().upper()
+                    cust_qty = get_valid_float(f"    Qty {cust_size}: ")
+                    if cust_qty and cust_qty > 0:
+                        staged_items.append((cust_size, int(cust_qty)))
+
+                if staged_items:
+                    inventory = load_csv(INVENTORY_FILE)
+                    print("\n  Saving Batch to Inventory...")
+                    for size, qty in staged_items:
+                        found = False
+                        # We save with the ORDER cost first, then run global recalc later
+                        for row in inventory:
+                            if (row['Brand'] == brand and row['Type'] == type_ and 
+                                row['Color'] == color and row['Size'] == size):
+                                
+                                old_qty = int(row['Quantity'])
+                                new_total = old_qty + qty
+                                row['Quantity'] = str(new_total)
+                                # Note: WAC Cost is not updated here, it's updated in recalculate_global_wac
+                                row['WAC_Group'] = wac_group
+                                print(f"    -> Added {qty} to {size}")
+                                found = True
+                                break
+                        if not found:
+                            inventory.append({
+                                "Brand": brand, "Type": type_, "Color": color, "Size": size,
+                                "Quantity": str(qty), "WAC_Cost": str(unit_cost), "WAC_Group": wac_group
+                            })
+                            print(f"    -> Created {size}: Stock {qty}")
+                    
+                    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
+                    
+                    # TRIGGER GLOBAL RECALCULATION
+                    recalculate_global_wac(wac_group)
+                
+                print(f"\nFinished {color}. Add another Color for {type_}?")
+
+            if single_type_mode:
+                break 
+            else:
+                print(f"\nFinished {type_}. Add another Type for {brand} (e.g. Pant)?")
+
+        confirm = input(f"\nFinished receiving {wac_group}? Mark as CLOSED? (y/n): ").lower()
+        if confirm == 'y':
+            all_orders[current_index]['Status'] = "Received"
+            save_csv(ORDERS_FILE, ORDER_COLUMNS, all_orders)
+            print("Group marked as closed.")
+        else:
+            print("Group left open (Partial Receive).")
+        
+        remaining = len(order_groups) - 1
+        if remaining > 0:
+            cont = input(f"\nThere are {remaining} other groups in Order #{target_order_id}. Continue? (y/n): ").lower()
+            if cont != 'y': return
+        else:
+            return
 
 def record_sale():
-    print("\n--- STEP 3: RECORD SALE ---")
-    
-    # I use the same smart logic for sales to match the inventory exactly
-    # Since I don't have a WAC group here, I pick Brand first
-    brand_list = list(SIZE_MAP.keys()) # Get brands from my config
-    brand = get_selection("Select Brand:", brand_list, allow_custom=True)
-    
-    # Standard colors
-    color = get_selection("Select Color:", VALID_COLORS, allow_custom=True)
-    
-    # Standard sizes for that brand
-    valid_sizes = SIZE_MAP.get(brand, ["S", "M", "L"])
-    size = get_selection("Select Size:", valid_sizes, allow_custom=True)
-    
-    type_ = input("Enter Type (e.g. Hoodie): ").strip().upper()
-    
-    inventory = load_csv(INVENTORY_FILE)
-    found_item = None
-    
-    for row in inventory:
-        if (row['Brand'] == brand and row['Color'] == color and 
-            row['Size'] == size and row['Type'] == type_):
-            found_item = row
-            break
-            
-    if not found_item:
-        print("Item not found in inventory. Check your selection.")
-        return
-        
-    current_qty = int(found_item['Quantity'])
-    if current_qty <= 0:
-        print("Error: Stock is 0.")
-        return
+    while True:
+        print("\n--- STEP 3: RECORD SALE ---")
+        brands = list(SIZE_MAP.keys())
+        brand = get_selection("Brand:", brands, "Custom")
+        if not brand: return
 
-    sale_price = get_valid_float("Sale Price: $")
-    cost = float(found_item['WAC_Cost'])
-    profit = sale_price - cost
-    
-    # Decrease Stock
-    found_item['Quantity'] = str(current_qty - 1)
-    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
-    
-    # Log Sale
-    sales = load_csv(SALES_FILE)
-    sales.append({
-        "Date": date.today().strftime("%m/%d/%Y"),
-        "Brand": found_item['Brand'],
-        "Type": found_item['Type'],
-        "Color": found_item['Color'],
-        "Size": found_item['Size'],
-        "Sale_Price": str(sale_price),
-        "Profit": str(round(profit, 2))
-    })
-    save_csv(SALES_FILE, SALES_COLUMNS, sales)
-    
-    print(f"Sold! Profit: ${profit:.2f}")
+        brand_types = BRAND_TYPES.get(brand, [])
+        type_ = get_selection("Type:", brand_types, "Custom")
+        if not type_: return
+
+        colors = BRAND_COLORS.get(brand, [])
+        color = get_selection("Color:", colors, "Custom")
+        if not color: return
+
+        sizes = SIZE_MAP.get(brand, ["S", "M", "L"])
+        size = get_selection("Size:", sizes, "Custom")
+        if not size: return
+
+        inventory = load_csv(INVENTORY_FILE)
+        found_item = None
+        for row in inventory:
+            if (row['Brand'] == brand and row['Color'] == color and 
+                row['Size'] == size and row['Type'] == type_):
+                found_item = row
+                break
+        
+        if not found_item:
+            print("Item not found! Try again.")
+            continue 
+
+        if int(found_item['Quantity']) <= 0:
+            print("Stock is 0! Cannot sell.")
+            continue
+
+        print(f"Found: {brand} {type_} {color} {size} (Stock: {found_item['Quantity']})")
+        price = get_valid_float("Sale Price: $")
+        if price is None: return
+
+        cost = float(found_item['WAC_Cost'])
+        profit = price - cost
+
+        summary = f"Selling: {brand} {type_} {size}\nPrice: ${price}\nEst. Profit: ${profit:.2f}"
+        action = confirm_action(summary)
+
+        if action == "SAVE":
+            found_item['Quantity'] = str(int(found_item['Quantity']) - 1)
+            save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
+            
+            sales = load_csv(SALES_FILE)
+            sales.append({
+                "Date": date.today().strftime("%m/%d/%Y"),
+                "Brand": brand, "Type": type_, "Color": color, "Size": size,
+                "Sale_Price": str(price), "Profit": str(round(profit, 2))
+            })
+            save_csv(SALES_FILE, SALES_COLUMNS, sales)
+            print("Sale Recorded!")
+            return
+        elif action == "CANCEL": return
 
 def manual_entry():
-    print("\n--- MANUAL ENTRY ---")
-    
-    brand_list = list(SIZE_MAP.keys())
-    brand = get_selection("Select Brand:", brand_list, allow_custom=True)
-    type_ = input("Enter Type (e.g. Hoodie): ").strip().upper()
-    color = get_selection("Select Color:", VALID_COLORS, allow_custom=True)
-    
-    valid_sizes = SIZE_MAP.get(brand, ["S", "M", "L"])
-    size = get_selection("Select Size:", valid_sizes, allow_custom=True)
-    
-    qty = int(get_valid_float("Quantity in hand: "))
-    wac = get_valid_float("Current WAC Cost ($): ")
+    while True:
+        print("\n--- MANUAL ENTRY (BATCH MODE) ---")
+        brand = get_selection("Brand:", list(SIZE_MAP.keys()), "Custom")
+        if not brand: return
+
+        while True:
+            brand_types = BRAND_TYPES.get(brand, [])
+            if len(brand_types) == 1:
+                type_ = brand_types[0]
+                print(f"Auto-selected Type: {type_}")
+                single_type_mode = True
+            elif brand_types:
+                type_ = get_selection("Type:", brand_types, "Custom")
+                single_type_mode = False
+            else:
+                type_ = input("Type: ").strip().upper()
+                single_type_mode = False
+            
+            if not type_: break
+
+            # Determine Group automatically
+            wac_group = find_wac_group(brand, type_)
+            print(f"Detected WAC Group: {wac_group}")
+
+            # Ask Cost ONCE for this Type
+            wac = get_valid_float(f"Cost of NEW items (Applied to Global Average): $")
+            if wac is None: break
+
+            while True:
+                colors = BRAND_COLORS.get(brand, [])
+                color = get_selection(f"Color for {type_}:", colors, "Custom")
+                if not color: break
+
+                valid_sizes = SIZE_MAP.get(brand, ["S", "M", "L"])
+                staged_items = []
+
+                print(f"\n--- BATCH ENTRY: {brand} {type_} {color} ---")
+                print("Enter quantity for each size (Press Enter to skip/0)")
+
+                for size in valid_sizes:
+                    qty = get_valid_float(f"  Qty {size}: ", allow_empty_as_zero=True)
+                    if qty is None: break
+                    if qty > 0:
+                        staged_items.append((size, int(qty)))
+
+                while True:
+                    add_custom = input("  Add outlier/custom size? (y/n): ").lower()
+                    if add_custom != 'y': break
+                    
+                    cust_size = input("    Enter Size: ").strip().upper()
+                    cust_qty = get_valid_float(f"    Qty {cust_size}: ")
+                    if cust_qty and cust_qty > 0:
+                        staged_items.append((cust_size, int(cust_qty)))
+
+                if staged_items:
+                    inventory = load_csv(INVENTORY_FILE)
+                    print("\n  Saving Batch...")
+                    for size, qty in staged_items:
+                        found = False
+                        for row in inventory:
+                            if (row['Brand'] == brand and row['Type'] == type_ and 
+                                row['Color'] == color and row['Size'] == size):
+                                row['Quantity'] = str(int(qty) + int(row.get('Quantity', 0))) # Add to existing? Or overwrite? 
+                                # Manual entry is usually "Correction" or "Adding". Assuming Adding for safety.
+                                # Wait, user said "Manual Entry/Correction". 
+                                # For batch math to work, we should treat it as adding stock. 
+                                # If it's a correction, set qty to 0 then add. But that's complex. 
+                                # Let's assume ADDING stock.
+                                row['WAC_Group'] = wac_group
+                                found = True
+                                break
+                        if not found:
+                            inventory.append({
+                                "Brand": brand, "Type": type_, "Color": color, "Size": size,
+                                "Quantity": str(qty), "WAC_Cost": str(wac), "WAC_Group": wac_group
+                            })
+                            print(f"    -> Added {size}: Stock {qty}")
+                    
+                    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
+                    
+                    # TRIGGER GLOBAL RECALCULATION
+                    if wac_group != "UNKNOWN":
+                        recalculate_global_wac(wac_group)
+                    else:
+                        print("Unknown Group - Items saved with individual cost.")
+
+                print(f"\nFinished {color}. Add another Color for {type_}?")
+            
+            if single_type_mode:
+                break
+            else:
+                print(f"\nFinished {type_}. Add another Type for {brand}?")
+
+def view_financials():
+    print("\n--- CEO DASHBOARD ---")
     
     inventory = load_csv(INVENTORY_FILE)
+    total_items = 0
+    total_asset_value = 0.0
     
-    # Check if exists to update, otherwise add
-    found = False
     for row in inventory:
-        if (row['Brand'] == brand and row['Type'] == type_ and 
-            row['Color'] == color and row['Size'] == size):
+        q = int(row['Quantity'])
+        c = float(row['WAC_Cost'])
+        if q > 0:
+            total_items += q
+            total_asset_value += (q * c)
             
-            # For manual entry, I assume I am correcting the count/cost
-            row['Quantity'] = str(qty)
-            row['WAC_Cost'] = str(wac)
-            found = True
-            print("Updated existing entry.")
-            break
-            
-    if not found:
-        inventory.append({
-            "Brand": brand, "Type": type_, "Color": color, "Size": size,
-            "Quantity": str(qty), "WAC_Cost": str(wac)
-        })
-        print("Added new entry.")
+    orders = load_csv(ORDERS_FILE)
+    pending_spend = 0.0
+    for row in orders:
+        if row['Status'] == 'Ordered':
+            pending_spend += float(row['Total_Cost'])
+
+    sales = load_csv(SALES_FILE)
+    total_sales = 0.0
+    total_profit = 0.0
+    sales_today = 0.0
+    today_str = date.today().strftime("%m/%d/%Y")
     
-    save_csv(INVENTORY_FILE, INVENTORY_COLUMNS, inventory)
+    for row in sales:
+        p = float(row['Profit'])
+        s = float(row['Sale_Price'])
+        total_profit += p
+        total_sales += s
+        if row['Date'] == today_str:
+            sales_today += s
+
+    print(f"Total Items in Stock:   {total_items}")
+    print(f"Total Inventory Value: ${total_asset_value:,.2f}")
+    print(f"Pending Orders Cost:   ${pending_spend:,.2f}")
+    print("-" * 30)
+    print(f"Total Sales (All Time):${total_sales:,.2f}")
+    print(f"Total Profit:          ${total_profit:,.2f}")
+    print(f"Sales Today:           ${sales_today:,.2f}")
+    input("\nPress Enter to return...")
 
 def view_inventory():
-    print("\n--- CURRENT INVENTORY ---")
     inventory = load_csv(INVENTORY_FILE)
-    if not inventory:
-        print("Inventory is empty.")
-    else:
-        # Simple header format
-        print(f"{'BRAND':<15} {'TYPE':<10} {'COLOR':<10} {'SIZE':<5} {'QTY':<5} {'WAC'}")
-        print("-" * 60)
-        for row in inventory:
-            if int(row['Quantity']) > 0:
-                print(f"{row['Brand']:<15} {row['Type']:<10} {row['Color']:<10} {row['Size']:<5} {row['Quantity']:<5} ${float(row['WAC_Cost']):.2f}")
+    print(f"\n{'BRAND':<15} {'TYPE':<10} {'COLOR':<10} {'SIZE':<5} {'QTY':<5} {'WAC':<10} {'TOTAL VAL'}")
+    print("-" * 80)
+    for row in inventory:
+        q = int(row['Quantity'])
+        if q > 0:
+            wac = float(row['WAC_Cost'])
+            val = q * wac
+            print(f"{row['Brand']:<15} {row['Type']:<10} {row['Color']:<10} {row['Size']:<5} {q:<5} ${wac:<9.2f} ${val:,.2f}")
+    input("\nPress Enter to return...")
 
 def main_menu():
     while True:
-        print("\n=== THREDVAULT MANAGER v3.0 ===")
+        print("\n=== THREDVAULT MANAGER v5.0 (GLOBAL WAC) ===")
         print("1. Create Purchase Order")
-        print("2. Receive Stock (Auto-Brand/Size Logic)")
+        print("2. Receive Stock")
         print("3. Record Sale")
         print("4. Manual Entry / Correction")
         print("5. View Inventory")
-        print("6. Exit")
+        print("6. CEO Dashboard (Financials)")
+        print("7. Exit (Auto-Backup)")
         
         choice = input("Select: ").strip()
-        
-        if choice == '1':
-            create_purchase_order()
-        elif choice == '2':
-            receive_stock()
-        elif choice == '3':
-            record_sale()
-        elif choice == '4':
-            manual_entry()
-        elif choice == '5':
-            view_inventory()
-        elif choice == '6':
+        if choice == '1': create_purchase_order()
+        elif choice == '2': receive_stock()
+        elif choice == '3': record_sale()
+        elif choice == '4': manual_entry()
+        elif choice == '5': view_inventory()
+        elif choice == '6': view_financials()
+        elif choice == '7': 
+            create_backup()
             print("Exiting...")
             break
-        else:
-            print("Invalid choice.")
+        else: print("Invalid choice.")
 
 if __name__ == "__main__":
     main_menu()
